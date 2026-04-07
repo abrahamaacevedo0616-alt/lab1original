@@ -359,4 +359,34 @@ def _transformacion_discreta_directa(n, x, M, n0, interp_mode='zero'):
     n_final = nI - n0
     return n_final, xI, f'Interpolación {modo} con factor L={L} para |M|<1.'
 
+def _interpolacion_discreta_notebook(x, n, M=1):
+    n_in = int(n[0])
+    n_fin = int(n[-1])
+
+    nI = np.arange(n_in, n_fin * M + 1)
+    L_nI = len(nI)
+    L_n = len(x)
+
+    x_nI0 = np.zeros(L_nI)
+    x_nIEsc = np.zeros(L_nI)
+    x_nILin = np.zeros(L_nI)
+
+    for k in range(L_nI):
+        if k % M == 0:
+            r = int(k / M)
+            x_nI0[k] = x[r]
+            x_nIEsc[k] = x[r]
+            x_nILin[k] = x[r]
+        else:
+            r = int(k / M)
+            x_nI0[k] = 0
+            x_nIEsc[k] = x_nIEsc[k - 1]
+
+            if r + 1 < L_n:
+                fraccion = (k % M) / M
+                x_nILin[k] = x[r] + fraccion * (x[r + 1] - x[r])
+            else:
+                x_nILin[k] = x[r]
+
+    return nI, x_nI0, x_nIEsc, x_nILin
 
