@@ -319,3 +319,44 @@ def transform_discrete(signal_key: str, m_mag: float, m_sign: str, n0: int, shif
         'note': note,
     }
 
+def _transformacion_discreta_directa(n, x, M, n0, interp_mode='zero'):
+    mapping = _mapping_discreto(n, x)
+
+    if abs(M) >= 1:
+        M_int = int(M)
+        n_final = []
+        x_final = []
+
+        for k in range(-100, 101):
+            argumento = M_int * k + n0
+            if argumento in mapping:
+                n_final.append(k)
+                x_final.append(mapping[argumento])
+
+        if len(n_final) == 0:
+            return np.array([0]), np.array([0.0]), 'No hubo índices válidos dentro del soporte.'
+
+        return np.array(n_final), np.array(x_final), 'Transformación discreta usando coincidencia exacta de índices.'
+
+    frac = Fraction(abs(M)).limit_denominator()
+    L = frac.denominator
+    nI, x0, xEsc, xLin = _interpolacion_discreta_notebook(x, n, L)
+
+    if interp_mode == 'zero':
+        xI = x0
+        modo = 'cero'
+    elif interp_mode == 'step':
+        xI = xEsc
+        modo = 'escalón'
+    else:
+        xI = xLin
+        modo = 'lineal'
+
+    if M < 0:
+        nI = -nI[::-1]
+        xI = xI[::-1]
+
+    n_final = nI - n0
+    return n_final, xI, f'Interpolación {modo} con factor L={L} para |M|<1.'
+
+
