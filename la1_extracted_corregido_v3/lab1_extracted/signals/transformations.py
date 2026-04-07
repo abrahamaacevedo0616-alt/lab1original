@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 from fractions import Fraction
 import numpy as np
@@ -170,5 +171,71 @@ def transform_continuous(signal_key: str, a_mag: float, a_sign: str, t0: int, sh
             'x': _to_list(x_final),
         },
         'note': 'Transformación continua escrita con puntos de quiebre, tramos y concatenación, como en el notebook de clase.',
+    }
+
+def interpolate_discrete(signal_key: str, L: int, mode: str) -> dict:
+    signal = get_signal_by_key(signal_key)
+    if signal['domain'] != 'discrete':
+        raise ValueError('La señal seleccionada no es discreta.')
+    if L not in [2, 3, 4, 5]:
+        raise ValueError('El factor de interpolación permitido es 2, 3, 4 o 5.')
+    if mode not in INTERP_METHODS:
+        raise ValueError('Método de interpolación no permitido.')
+
+    n = np.array(signal['n'], dtype=int)
+    x_n = np.array(signal['x'], dtype=float)
+
+    nI, x0, xEsc, xLin = _interpolacion_discreta_notebook(x_n, n, L)
+
+    if mode == 'zero':
+        x_final = x0
+        nombre = 'por cero'
+        note = f'Se insertan {L-1} muestras nulas entre muestras consecutivas.'
+    elif mode == 'step':
+        x_final = xEsc
+        nombre = 'por escalón'
+        note = f'Se insertan {L-1} muestras repitiendo el último valor.'
+    else:
+        x_final = xLin
+        nombre = 'lineal'
+        note = f'Se insertan {L-1} muestras usando rectas entre muestras consecutivas.'
+
+    return {
+        'domain': 'discrete',
+        'signal_key': signal_key,
+        'mode': mode,
+        'factor': L,
+        'final_expression': f'y[n] = x[n/{L}] ({nombre})',
+        'note': note,
+        'original_signal': {
+            'title': 'Señal original',
+            'domain': 'discrete',
+            'n': n.tolist(),
+            'x': x_n.tolist(),
+            'n0': 0,
+        },
+        'final_signal': {
+            'title': f'Interpolación {nombre}',
+            'domain': 'discrete',
+            'n': nI.tolist(),
+            'x': x_final.tolist(),
+            'n0': 0,
+        },
+        'steps': [
+            {
+                'title': 'Paso 1 — Señal original',
+                'expression': 'x[n]',
+                'domain': 'discrete',
+                'n': n.tolist(),
+                'x': x_n.tolist(),
+            },
+            {
+                'title': f'Paso 2 — Interpolación {nombre}',
+                'expression': f'y[n] = x[n/{L}]',
+                'domain': 'discrete',
+                'n': nI.tolist(),
+                'x': x_final.tolist(),
+            }
+        ]
     }
 
