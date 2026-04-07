@@ -239,3 +239,83 @@ def interpolate_discrete(signal_key: str, L: int, mode: str) -> dict:
         ]
     }
 
+def transform_discrete(signal_key: str, m_mag: float, m_sign: str, n0: int, shift_sign: str, method: str, interp_mode: str = 'zero') -> dict:
+    _validate_sign(m_sign)
+    _validate_sign(shift_sign)
+
+    if m_mag not in ALLOWED_M:
+        raise ValueError('Valor de |M| no permitido.')
+    if n0 not in ALLOWED_N0:
+        raise ValueError('Valor de n0 no permitido.')
+    if method not in ('method_1', 'method_2'):
+        raise ValueError('Método no permitido.')
+
+    signal = get_signal_by_key(signal_key)
+    if signal['domain'] != 'discrete':
+        raise ValueError('La señal seleccionada no es discreta.')
+
+    n = np.array(signal['n'], dtype=int)
+    x = np.array(signal['x'], dtype=float)
+
+    M = _sign(m_sign) * float(m_mag)
+    b = _sign(shift_sign) * int(n0)
+
+    # Para mostrar paso a paso, se sigue la idea de notebook:
+    # primero desplazamiento y luego escalamiento (o al revés),
+    # pero el resultado final se deja funcional para la app.
+    if method == 'method_1':
+        n_step1 = n - b
+        x_step1 = x.copy()
+        n_final, x_final, note = _transformacion_discreta_directa(n, x, M, b, interp_mode)
+        steps = [
+            {
+                'title': 'Paso 1 — Desplazamiento discreto',
+                'expression': f'v[n] = x[n {"+" if b >= 0 else "-"} {abs(b)}]',
+                'domain': 'discrete',
+                'n': n_step1.tolist(),
+                'x': x_step1.tolist(),
+            },
+            {
+                'title': 'Paso 2 — Escalamiento discreto',
+                'expression': f'y[n] = v[{M:g}n]',
+                'domain': 'discrete',
+                'n': n_final.tolist(),
+                'x': x_final.tolist(),
+            }
+        ]
+    else:
+        n_step1, x_step1, _ = _transformacion_discreta_directa(n, x, M, 0, interp_mode)
+        n_final, x_final, note = _transformacion_discreta_directa(n, x, M, b, interp_mode)
+        steps = [
+            {
+                'title': 'Paso 1 — Escalamiento discreto',
+                'expression': f'v[n] = x[{M:g}n]',
+                'domain': 'discrete',
+                'n': n_step1.tolist(),
+                'x': x_step1.tolist(),
+            },
+            {
+                'title': 'Paso 2 — Desplazamiento discreto',
+                'expression': f'y[n] = v[n {"+" if (b / M if M != 0 else 0) >= 0 else "-"} {abs(b / M) if M != 0 else 0:g}]',
+                'domain': 'discrete',
+                'n': n_final.tolist(),
+                'x': x_final.tolist(),
+            }
+        ]
+
+    return {
+        'signal_key': signal_key,
+        'domain': 'discrete',
+        'method': method,
+        'final_expression': f'y[n] = x[{M:g}n {"+" if b >= 0 else "-"} {abs(b)}]',
+        'steps': steps,
+        'final_signal': {
+            'title': 'Secuencia transformada',
+            'domain': 'discrete',
+            'n': n_final.tolist(),
+            'x': x_final.tolist(),
+            'n0': 0,
+        },
+        'note': note,
+    }
+
