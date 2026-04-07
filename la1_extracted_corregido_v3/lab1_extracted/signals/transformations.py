@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from fractions import Fraction
-
 import numpy as np
 
-from signals.base_signals import get_signal_by_key
+from signals.base_signals import Delta, continuous_support, evaluate_continuous_signal, get_signal_by_key
 
-
-ALLOWED_A = [2, 3, 4, 5, 1/2, 1/3, 1/4, 1/5]
+ALLOWED_A = [2, 3, 4, 5, 1 / 2, 1 / 3, 1 / 4, 1 / 5]
 ALLOWED_T0 = [1, 2, 3, 4, 5, 6]
-ALLOWED_M = [2, 3, 4, 1/2, 1/3, 1/4, 1/5]
+ALLOWED_M = [2, 3, 4, 1 / 2, 1 / 3, 1 / 4, 1 / 5]
 ALLOWED_N0 = [1, 2, 3, 4, 5, 6]
 INTERP_METHODS = ['zero', 'step', 'linear']
 
@@ -19,109 +17,35 @@ def _validate_sign(sign: str) -> None:
         raise ValueError("El signo debe ser '+' o '-'.")
 
 
-
 def _sign(sign: str) -> int:
-    if sign == '+':
-        return 1
-    return -1
+    return 1 if sign == '+' else -1
 
 
-
-def _split_continuous_segments(t_x: np.ndarray, x_t: np.ndarray, tol: float = 1e-6):
-    """
-    Separa la señal continua en tramos con pendiente constante,
-    para dejar la transformación escrita como en los notebooks:
-    puntos de quiebre -> intervalos -> ecuaciones de cada tramo.
-    """
-    if len(t_x) < 3:
-        return [(t_x.copy(), x_t.copy())]
-
-    pendientes = np.diff(x_t) / np.diff(t_x)
-    cortes = [0]
-
-    for i in range(1, len(pendientes)):
-        if abs(pendientes[i] - pendientes[i - 1]) > tol:
-            cortes.append(i)
-
-    cortes.append(len(t_x) - 1)
-
-    segmentos = []
-    for i in range(len(cortes) - 1):
-        ini = cortes[i]
-        fin = cortes[i + 1] + 1
-        segmentos.append((t_x[ini:fin].copy(), x_t[ini:fin].copy()))
-
-    return segmentos
+def _to_list(a):
+    return np.array(a, dtype=float).tolist()
 
 
+# ============================================================
+# TRANSFORMACIONES CONTINUAS TIPO NOTEBOOK
+# ============================================================
 
+def _continuous_by_argument(signal_key: str, alpha: float, beta: float):
+    p = continuous_support(signal_key)
+    nuevos_p = []
+    for i in range(len(p)):
+        nuevos_p.append((p[i] - beta) / alpha)
 
+    if alpha < 0:
+        nuevos_p = nuevos_p[::-1]
 
-def _safe_delta(t: np.ndarray, default: float = 0.01) -> float:
-    if len(t) < 2:
-        return default
-    dif = np.diff(np.sort(np.unique(np.round(t, 10))))
-    dif = dif[dif > 1e-9]
-    if len(dif) == 0:
-        return default
-    return float(np.min(dif))
+    t1 = np.arange(nuevos_p[0], nuevos_p[1], Delta)
+    t2 = np.arange(nuevos_p[1], nuevos_p[2], Delta)
+    t3 = np.arange(nuevos_p[2], nuevos_p[3], Delta)
+    t4 = np.arange(nuevos_p[3], nuevos_p[4] + Delta, Delta)
 
-def _extract_continuous_model(t_x: np.ndarray, x_t: np.ndarray):
-    segmentos = _split_continuous_segments(t_x, x_t)
-    modelo = []
-
-    for tramo_t, tramo_x in segmentos:
-        m = (tramo_x[-1] - tramo_x[0]) / (tramo_t[-1] - tramo_t[0]) if abs(tramo_t[-1] - tramo_t[0]) > 1e-12 else 0.0
-        b = tramo_x[0] - m * tramo_t[0]
-        modelo.append({
-            'p_ini': float(tramo_t[0]),
-            'p_fin': float(tramo_t[-1]),
-            'm': float(m),
-            'b': float(b),
-        })
-
-    delta_x = _safe_delta(t_x, 0.01)
-    return modelo, delta_x
-
-
-
-def _build_continuous_from_argument(t_x: np.ndarray, x_t: np.ndarray, alpha: float, beta: float):
-    """
-    Construye y(t)=x(alpha*t+beta) con una forma más parecida a clase:
-    1) identificar puntos de quiebre de x(t)
-    2) transformar cada intervalo del eje temporal
-    3) escribir cada tramo y concatenar
-    """
-    modelo, delta_x = _extract_continuous_model(t_x, x_t)
-    delta_t = delta_x / abs(alpha)
-
-    partes_t = []
-    partes_x = []
-
-    for i, tramo in enumerate(modelo):
-        p1 = tramo['p_ini']
-        p2 = tramo['p_fin']
-        m = tramo['m']
-        b = tramo['b']
-
-        q1 = (p1 - beta) / alpha
-        q2 = (p2 - beta) / alpha
-
-        ti = np.arange(min(q1, q2), max(q1, q2), delta_t)
-        if i == len(modelo) - 1:
-            ti = np.arange(min(q1, q2), max(q1, q2) + delta_t, delta_t)
-
-        xi = m * (alpha * ti + beta) + b
-
-        partes_t.append(ti)
-        partes_x.append(xi)
-
-    t = np.concatenate(partes_t)
-    x = np.concatenate(partes_x)
-
-    orden = np.argsort(t)
-    return t[orden], x[orden]
-
+    t = np.concatenate((t1, t2, t3, t4))
+    x = evaluate_continuous_signal(signal_key, alpha * t + beta)
+    return t, x, nuevos_p
 
 
 def transform_continuous(signal_key: str, a_mag: float, a_sign: str, t0: int, shift_sign: str, method: str) -> dict:
@@ -139,51 +63,100 @@ def transform_continuous(signal_key: str, a_mag: float, a_sign: str, t0: int, sh
     if signal['domain'] != 'continuous':
         raise ValueError('La señal seleccionada no es continua.')
 
-    t_x = np.array(signal['t'], dtype=float)
-    x_t = np.array(signal['x'], dtype=float)
-
     a = _sign(a_sign) * float(a_mag)
     b = _sign(shift_sign) * float(t0)
 
+    # Método 1 del notebook: desplazamiento y luego escalamiento
     if method == 'method_1':
-        t_step1, x_step1 = _build_continuous_from_argument(t_x, x_t, alpha=1.0, beta=b)
-        t_step2, x_step2 = _build_continuous_from_argument(t_x, x_t, alpha=a, beta=b)
+        p = continuous_support(signal_key)
+
+        nuevos_p = []
+        for i in range(len(p)):
+            nuevos_p.append(p[i] - b)
+
+        t1 = np.arange(nuevos_p[0], nuevos_p[1], Delta)
+        t2 = np.arange(nuevos_p[1], nuevos_p[2], Delta)
+        t3 = np.arange(nuevos_p[2], nuevos_p[3], Delta)
+        t4 = np.arange(nuevos_p[3], nuevos_p[4] + Delta, Delta)
+
+        t_step1 = np.concatenate((t1, t2, t3, t4))
+        x_step1 = evaluate_continuous_signal(signal_key, t_step1 + b)
+
+        for i in range(len(nuevos_p)):
+            nuevos_p[i] = nuevos_p[i] * (1 / a)
+
+        if a < 0:
+            nuevos_p = nuevos_p[::-1]
+
+        t1 = np.arange(nuevos_p[0], nuevos_p[1], Delta)
+        t2 = np.arange(nuevos_p[1], nuevos_p[2], Delta)
+        t3 = np.arange(nuevos_p[2], nuevos_p[3], Delta)
+        t4 = np.arange(nuevos_p[3], nuevos_p[4] + Delta, Delta)
+
+        t_final = np.concatenate((t1, t2, t3, t4))
+        x_final = evaluate_continuous_signal(signal_key, a * t_final + b)
 
         steps = [
             {
                 'title': 'Paso 1 — Desplazamiento',
                 'expression': f'v(t) = x(t {"+" if b >= 0 else "-"} {abs(b):g})',
                 'domain': 'continuous',
-                't': t_step1.tolist(),
-                'x': x_step1.tolist(),
+                't': _to_list(t_step1),
+                'x': _to_list(x_step1),
             },
             {
                 'title': 'Paso 2 — Escalamiento',
                 'expression': f'y(t) = v({a:g}t)',
                 'domain': 'continuous',
-                't': t_step2.tolist(),
-                'x': x_step2.tolist(),
-            }
+                't': _to_list(t_final),
+                'x': _to_list(x_final),
+            },
         ]
+
     else:
-        t_step1, x_step1 = _build_continuous_from_argument(t_x, x_t, alpha=a, beta=0.0)
-        t_step2, x_step2 = _build_continuous_from_argument(t_x, x_t, alpha=a, beta=b)
+        p = continuous_support(signal_key)
+
+        nuevos_p = []
+        for i in range(len(p)):
+            nuevos_p.append(p[i] * (1 / a))
+
+        if a < 0:
+            nuevos_p = nuevos_p[::-1]
+
+        t1 = np.arange(nuevos_p[0], nuevos_p[1], Delta)
+        t2 = np.arange(nuevos_p[1], nuevos_p[2], Delta)
+        t3 = np.arange(nuevos_p[2], nuevos_p[3], Delta)
+        t4 = np.arange(nuevos_p[3], nuevos_p[4] + Delta, Delta)
+
+        t_step1 = np.concatenate((t1, t2, t3, t4))
+        x_step1 = evaluate_continuous_signal(signal_key, a * t_step1)
+
+        for i in range(len(nuevos_p)):
+            nuevos_p[i] = nuevos_p[i] - (b / a)
+
+        t1 = np.arange(nuevos_p[0], nuevos_p[1], Delta)
+        t2 = np.arange(nuevos_p[1], nuevos_p[2], Delta)
+        t3 = np.arange(nuevos_p[2], nuevos_p[3], Delta)
+        t4 = np.arange(nuevos_p[3], nuevos_p[4] + Delta, Delta)
+
+        t_final = np.concatenate((t1, t2, t3, t4))
+        x_final = evaluate_continuous_signal(signal_key, a * t_final + b)
 
         steps = [
             {
                 'title': 'Paso 1 — Escalamiento',
                 'expression': f'v(t) = x({a:g}t)',
                 'domain': 'continuous',
-                't': t_step1.tolist(),
-                'x': x_step1.tolist(),
+                't': _to_list(t_step1),
+                'x': _to_list(x_step1),
             },
             {
                 'title': 'Paso 2 — Desplazamiento',
-                'expression': f'y(t) = v(t {"+" if b/a >= 0 else "-"} {abs(b/a):g})',
+                'expression': f'y(t) = v(t {"+" if b / a >= 0 else "-"} {abs(b / a):g})',
                 'domain': 'continuous',
-                't': t_step2.tolist(),
-                'x': x_step2.tolist(),
-            }
+                't': _to_list(t_final),
+                'x': _to_list(x_final),
+            },
         ]
 
     return {
@@ -195,45 +168,47 @@ def transform_continuous(signal_key: str, a_mag: float, a_sign: str, t0: int, sh
         'final_signal': {
             'title': 'Señal transformada',
             'domain': 'continuous',
-            't': t_step2.tolist(),
-            'x': x_step2.tolist(),
+            't': _to_list(t_final),
+            'x': _to_list(x_final),
         },
-        'note': 'La transformación continua se escribió por intervalos y tramos, siguiendo la lógica de puntos de quiebre y concatenación.',
+        'note': 'Transformación continua escrita con puntos de quiebre, tramos y concatenación, como en el notebook de clase.',
     }
 
 
+# ============================================================
+# INTERPOLACIÓN DISCRETA TIPO NOTEBOOK
+# ============================================================
 
-def _discrete_mapping(n: np.ndarray, x: np.ndarray) -> dict:
-    return {int(k): float(v) for k, v in zip(n, x)}
+def _interpolacion_discreta_notebook(x, n, M=1):
+    n_in = int(n[0])
+    n_fin = int(n[-1])
 
+    nI = np.arange(n_in, n_fin * M + 1)
+    L_nI = len(nI)
+    L_n = len(x)
 
+    x_nI0 = np.zeros(L_nI)
+    x_nIEsc = np.zeros(L_nI)
+    x_nILin = np.zeros(L_nI)
 
-def _build_interpolation(n_original: np.ndarray, x_original: np.ndarray, L: int, mode: str):
-    n_new = np.arange(n_original[0] * L, n_original[-1] * L + 1)
-    x_new = np.zeros(len(n_new), dtype=float)
-
-    index_map = {int(k * L): float(v) for k, v in zip(n_original, x_original)}
-
-    for i, k in enumerate(n_new):
-        if k in index_map:
-            x_new[i] = index_map[k]
+    for k in range(L_nI):
+        if k % M == 0:
+            r = int(k / M)
+            x_nI0[k] = x[r]
+            x_nIEsc[k] = x[r]
+            x_nILin[k] = x[r]
         else:
-            left_idx = int(np.floor((k - n_original[0] * L) / L))
-            left_idx = max(0, min(left_idx, len(n_original) - 2))
+            r = int(k / M)
+            x_nI0[k] = 0
+            x_nIEsc[k] = x_nIEsc[k - 1]
 
-            x_left = x_original[left_idx]
-            x_right = x_original[left_idx + 1]
-            r = (k - n_original[left_idx] * L) / L
-
-            if mode == 'zero':
-                x_new[i] = 0.0
-            elif mode == 'step':
-                x_new[i] = x_left
+            if r + 1 < L_n:
+                fraccion = (k % M) / M
+                x_nILin[k] = x[r] + fraccion * (x[r + 1] - x[r])
             else:
-                x_new[i] = x_left + (x_right - x_left) * r
+                x_nILin[k] = x[r]
 
-    return n_new, x_new
-
+    return nI, x_nI0, x_nIEsc, x_nILin
 
 
 def interpolate_discrete(signal_key: str, L: int, mode: str) -> dict:
@@ -248,27 +223,28 @@ def interpolate_discrete(signal_key: str, L: int, mode: str) -> dict:
     n = np.array(signal['n'], dtype=int)
     x_n = np.array(signal['x'], dtype=float)
 
-    nI, x_nI = _build_interpolation(n, x_n, L, mode)
+    nI, x0, xEsc, xLin = _interpolacion_discreta_notebook(x_n, n, L)
 
-    nombres = {
-        'zero': 'por cero',
-        'step': 'por escalón',
-        'linear': 'lineal',
-    }
-
-    notas = {
-        'zero': f'Se insertan {L-1} muestras nulas entre muestras consecutivas.',
-        'step': f'Se insertan {L-1} muestras conservando el último valor conocido.',
-        'linear': f'Se insertan {L-1} muestras calculadas por recta entre muestras consecutivas.',
-    }
+    if mode == 'zero':
+        x_final = x0
+        nombre = 'por cero'
+        note = f'Se insertan {L-1} muestras nulas entre muestras consecutivas.'
+    elif mode == 'step':
+        x_final = xEsc
+        nombre = 'por escalón'
+        note = f'Se insertan {L-1} muestras repitiendo el último valor.'
+    else:
+        x_final = xLin
+        nombre = 'lineal'
+        note = f'Se insertan {L-1} muestras usando rectas entre muestras consecutivas.'
 
     return {
         'domain': 'discrete',
         'signal_key': signal_key,
         'mode': mode,
         'factor': L,
-        'final_expression': f'y[n] = x[n/{L}] ({nombres[mode]})',
-        'note': notas[mode],
+        'final_expression': f'y[n] = x[n/{L}] ({nombre})',
+        'note': note,
         'original_signal': {
             'title': 'Señal original',
             'domain': 'discrete',
@@ -277,10 +253,10 @@ def interpolate_discrete(signal_key: str, L: int, mode: str) -> dict:
             'n0': 0,
         },
         'final_signal': {
-            'title': f'Interpolación {nombres[mode]}',
+            'title': f'Interpolación {nombre}',
             'domain': 'discrete',
             'n': nI.tolist(),
-            'x': x_nI.tolist(),
+            'x': x_final.tolist(),
             'n0': 0,
         },
         'steps': [
@@ -292,55 +268,63 @@ def interpolate_discrete(signal_key: str, L: int, mode: str) -> dict:
                 'x': x_n.tolist(),
             },
             {
-                'title': f'Paso 2 — Interpolación {nombres[mode]}',
+                'title': f'Paso 2 — Interpolación {nombre}',
                 'expression': f'y[n] = x[n/{L}]',
                 'domain': 'discrete',
                 'n': nI.tolist(),
-                'x': x_nI.tolist(),
+                'x': x_final.tolist(),
             }
         ]
     }
 
 
+# ============================================================
+# TRANSFORMACIONES DISCRETAS
+# ============================================================
 
-def _transform_discrete_direct(n_original: np.ndarray, x_original: np.ndarray, M: float, b: int, interp_mode: str = 'zero'):
-    mapping = _discrete_mapping(n_original, x_original)
+def _mapping_discreto(n, x):
+    return {int(n[i]): float(x[i]) for i in range(len(n))}
+
+
+def _transformacion_discreta_directa(n, x, M, n0, interp_mode='zero'):
+    mapping = _mapping_discreto(n, x)
 
     if abs(M) >= 1:
         M_int = int(M)
-        n_candidates = np.arange(-80, 81)
-        n_valid = []
-        x_valid = []
+        n_final = []
+        x_final = []
 
-        for n in n_candidates:
-            arg = M_int * n + b
-            if arg in mapping:
-                n_valid.append(int(n))
-                x_valid.append(mapping[arg])
+        for k in range(-100, 101):
+            argumento = M_int * k + n0
+            if argumento in mapping:
+                n_final.append(k)
+                x_final.append(mapping[argumento])
 
-        if len(n_valid) == 0:
-            return np.array([0]), np.array([0.0]), 'No hubo muestras coincidentes dentro del soporte original.'
+        if len(n_final) == 0:
+            return np.array([0]), np.array([0.0]), 'No hubo índices válidos dentro del soporte.'
 
-        return (
-            np.array(n_valid, dtype=int),
-            np.array(x_valid, dtype=float),
-            'Transformación discreta usando coincidencia exacta de índices (diezmado/compresión discreta).'
-        )
+        return np.array(n_final), np.array(x_final), 'Transformación discreta usando coincidencia exacta de índices.'
 
     frac = Fraction(abs(M)).limit_denominator()
     L = frac.denominator
-    nI, x_nI = _build_interpolation(n_original, x_original, L, interp_mode)
+    nI, x0, xEsc, xLin = _interpolacion_discreta_notebook(x, n, L)
+
+    if interp_mode == 'zero':
+        xI = x0
+        modo = 'cero'
+    elif interp_mode == 'step':
+        xI = xEsc
+        modo = 'escalón'
+    else:
+        xI = xLin
+        modo = 'lineal'
 
     if M < 0:
         nI = -nI[::-1]
-        x_nI = x_nI[::-1]
+        xI = xI[::-1]
 
-    n_shift = nI - b
-    order = np.argsort(n_shift)
-
-    modo = {'zero': 'cero', 'step': 'escalón', 'linear': 'lineal'}[interp_mode]
-    return n_shift[order], x_nI[order], f'Interpolación {modo} con factor L={L} para |M|<1.'
-
+    n_final = nI - n0
+    return n_final, xI, f'Interpolación {modo} con factor L={L} para |M|<1.'
 
 
 def transform_discrete(signal_key: str, m_mag: float, m_sign: str, n0: int, shift_sign: str, method: str, interp_mode: str = 'zero') -> dict:
@@ -359,36 +343,60 @@ def transform_discrete(signal_key: str, m_mag: float, m_sign: str, n0: int, shif
         raise ValueError('La señal seleccionada no es discreta.')
 
     n = np.array(signal['n'], dtype=int)
-    x_n = np.array(signal['x'], dtype=float)
+    x = np.array(signal['x'], dtype=float)
 
     M = _sign(m_sign) * float(m_mag)
     b = _sign(shift_sign) * int(n0)
 
-    n_final, x_final, note = _transform_discrete_direct(n, x_n, M, b, interp_mode=interp_mode)
-    n_shift, x_shift, _ = _transform_discrete_direct(n, x_n, 1.0, b, interp_mode=interp_mode)
-
-    steps = [
-        {
-            'title': 'Paso 1 — Desplazamiento discreto',
-            'expression': f'v[n] = x[n {"+" if b >= 0 else "-"} {abs(b)}]',
-            'domain': 'discrete',
-            'n': n_shift.tolist(),
-            'x': x_shift.tolist(),
-        },
-        {
-            'title': 'Paso 2 — Escalamiento discreto',
-            'expression': f'y[n] = v[{M:g}n]',
-            'domain': 'discrete',
-            'n': n_final.tolist(),
-            'x': x_final.tolist(),
-        }
-    ]
+    # Para mostrar paso a paso, se sigue la idea de notebook:
+    # primero desplazamiento y luego escalamiento (o al revés),
+    # pero el resultado final se deja funcional para la app.
+    if method == 'method_1':
+        n_step1 = n - b
+        x_step1 = x.copy()
+        n_final, x_final, note = _transformacion_discreta_directa(n, x, M, b, interp_mode)
+        steps = [
+            {
+                'title': 'Paso 1 — Desplazamiento discreto',
+                'expression': f'v[n] = x[n {"+" if b >= 0 else "-"} {abs(b)}]',
+                'domain': 'discrete',
+                'n': n_step1.tolist(),
+                'x': x_step1.tolist(),
+            },
+            {
+                'title': 'Paso 2 — Escalamiento discreto',
+                'expression': f'y[n] = v[{M:g}n]',
+                'domain': 'discrete',
+                'n': n_final.tolist(),
+                'x': x_final.tolist(),
+            }
+        ]
+    else:
+        n_step1, x_step1, _ = _transformacion_discreta_directa(n, x, M, 0, interp_mode)
+        n_final, x_final, note = _transformacion_discreta_directa(n, x, M, b, interp_mode)
+        steps = [
+            {
+                'title': 'Paso 1 — Escalamiento discreto',
+                'expression': f'v[n] = x[{M:g}n]',
+                'domain': 'discrete',
+                'n': n_step1.tolist(),
+                'x': x_step1.tolist(),
+            },
+            {
+                'title': 'Paso 2 — Desplazamiento discreto',
+                'expression': f'y[n] = v[n {"+" if (b / M if M != 0 else 0) >= 0 else "-"} {abs(b / M) if M != 0 else 0:g}]',
+                'domain': 'discrete',
+                'n': n_final.tolist(),
+                'x': x_final.tolist(),
+            }
+        ]
 
     return {
         'signal_key': signal_key,
         'domain': 'discrete',
         'method': method,
         'final_expression': f'y[n] = x[{M:g}n {"+" if b >= 0 else "-"} {abs(b)}]',
+        'steps': steps,
         'final_signal': {
             'title': 'Secuencia transformada',
             'domain': 'discrete',
@@ -396,6 +404,5 @@ def transform_discrete(signal_key: str, m_mag: float, m_sign: str, n0: int, shif
             'x': x_final.tolist(),
             'n0': 0,
         },
-        'steps': steps,
         'note': note,
     }
