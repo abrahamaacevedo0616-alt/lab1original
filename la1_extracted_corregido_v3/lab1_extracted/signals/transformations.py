@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 from fractions import Fraction
 import numpy as np
@@ -27,6 +26,15 @@ def _to_list(a):
 # ============================================================
 # TRANSFORMACIONES CONTINUAS TIPO NOTEBOOK
 # ============================================================
+
+def _mapping_discreto(n, x):
+    """
+    Mapea índices y valores de señales discretas.
+    """
+    n = np.array(n, dtype=int)
+    x = np.array(x, dtype=float)
+    return {int(ni): float(xi) for ni, xi in zip(n, x)}
+
 
 def _continuous_by_argument(signal_key: str, alpha: float, beta: float):
     p = continuous_support(signal_key)
@@ -389,4 +397,5 @@ def _interpolacion_discreta_notebook(x, n, M=1):
                 x_nILin[k] = x[r]
 
     return nI, x_nI0, x_nIEsc, x_nILin
+
 
